@@ -138,7 +138,21 @@
     if(!document.getElementById('a11y-global-styles')){
       const style = document.createElement('style');
       style.id = 'a11y-global-styles';
-      style.textContent = `@keyframes slideIn{from{transform:translateX(100%);}to{transform:translateX(0);}}@keyframes slideOut{from{transform:translateX(0);}to{transform:translateX(100%);}}@media(max-width:768px){#a11y-overlay{width:100% !important;}}`;
+      style.textContent = `
+        @keyframes slideIn{from{transform:translateX(100%);}to{transform:translateX(0);}}
+        @keyframes slideOut{from{transform:translateX(0);}to{transform:translateX(100%);}}
+        @media(max-width:768px){#a11y-overlay{width:100% !important;}}
+        /* Style for the resize handle */
+        #a11y-resizer {
+          position: absolute;
+          top: 0;
+          left: -8px; /* Slightly overlaps the border for easy grabbing */
+          bottom: 0;
+          width: 16px;
+          cursor: col-resize;
+          z-index: 1000000;
+        }
+      `;
       document.head.appendChild(style);
     }
 
@@ -146,29 +160,65 @@
     const sidebar = document.createElement('div');
     sidebar.id = 'a11y-overlay';
     sidebar.style.cssText = `position:fixed;top:0;right:0;bottom:0;width:450px;background:white;z-index:999999;display:flex;flex-direction:column;box-shadow:-4px 0 20px rgba(0,0,0,0.3);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;animation:slideIn 0.3s ease-out;transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);`;
-    sidebar.innerHTML = `<div role="banner" id="a11y-header" style="background:#00274c;color:white;padding:20px;border-bottom:3px solid #ffcb05;transition:opacity 0.3s ease;"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;"><h2 style="margin:0;font-size:20px;flex:1;color:#ffffff;">LibGuides A11y Scanner</h2>
-    <button id="a11y-close-btn" style="
-  /* MODERN CLOSE BUTTON STYLES ONLY */
-  background: none;
-  border: 2px solid #ffcb05;
-  border-radius: 50%;
-  width: 40px;
-  height: 40px;
-  line-height: 1;
-  color: #ffcb05;
-  font-weight: bold;
-  font-size: 18px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-" title="Close scanner completely" aria-label="Close and remove accessibility scanner">✕</button>
-    </div><div id="scan-status" style="margin-top:10px;font-size:14px;opacity:0.9;color:#ffffff;">Finding LibGuides content...</div></div><main id="a11y-results" style="flex:1;overflow-y:auto;padding:20px;color:#333;text-align:center;">Initializing scanner...<br><br>⏳</main>`;
+    sidebar.innerHTML = `
+      <div id="a11y-resizer" title="Drag to resize sidebar"></div>
+      <div role="banner" id="a11y-header" style="background:#00274c;color:white;padding:20px;border-bottom:3px solid #ffcb05;transition:opacity 0.3s ease;"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;"><h2 style="margin:0;font-size:20px;flex:1;color:#ffffff;">🔍 A11y Scanner</h2>
+      <button id="a11y-close-btn" style="
+        /* MODERN CLOSE BUTTON STYLES ONLY */
+        background: none;
+        border: 2px solid #ffcb05;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        line-height: 1;
+        color: #ffcb05;
+        font-weight: bold;
+        font-size: 18px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s ease;
+      " title="Close scanner completely" aria-label="Close and remove accessibility scanner">✕</button>
+      </div><div id="scan-status" style="margin-top:10px;font-size:14px;opacity:0.9;color:#ffffff;">Finding LibGuides content...</div></div><main id="a11y-results" style="flex:1;overflow-y:auto;padding:20px;color:#333;text-align:center;">Initializing scanner...<br><br>⏳</main>`;
     document.body.appendChild(sidebar);
 
     // Close button
     document.getElementById('a11y-close-btn').onclick = () => {sidebar.style.animation = 'slideOut 0.3s ease-in'; sidebar.addEventListener('animationend', () => {sidebar.remove();});};
+
+    // --- Resizing Logic Start ---
+    const resizer = document.getElementById('a11y-resizer');
+    const minWidth = 300; // Minimum width for the sidebar
+
+    let isResizing = false;
+
+    resizer.addEventListener('mousedown', function(e) {
+      isResizing = true;
+      // Disable CSS animation during drag for smoothness
+      sidebar.style.transition = 'none';
+      document.body.style.userSelect = 'none'; // Prevent text selection while resizing
+      document.body.style.cursor = 'col-resize';
+    });
+
+    document.addEventListener('mousemove', function(e) {
+      if (!isResizing) return;
+      
+      const newWidth = window.innerWidth - e.clientX;
+      if (newWidth > minWidth) {
+        sidebar.style.width = newWidth + 'px';
+      }
+    });
+
+    document.addEventListener('mouseup', function() {
+      if (isResizing) {
+        isResizing = false;
+        // Restore CSS animation and user select state
+        sidebar.style.transition = 'transform 0.3s cubic-bezier(0.4,0,0.2,1)';
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+      }
+    });
+    // --- Resizing Logic End ---
 
     const container = findLibGuidesContainer();
     document.getElementById('scan-status').textContent = 'Running accessibility checks...';
