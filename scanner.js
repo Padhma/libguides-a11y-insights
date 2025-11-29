@@ -1,13 +1,11 @@
 (function() {
   'use strict';
   
-  // Prevent multiple instances
   if (document.getElementById('a11y-overlay')) {
     alert('Scanner already running!');
     return;
   }
 
-  // ============= CONFIGURATION =============
   const ISSUE_EXPLANATIONS = {
     'image-alt': {title:'Images Missing Descriptions', plain:'Images need alternative text so screen readers can describe them to blind users.', howToFix:'In LibGuides editor: Click the image → Properties → Add description in "Alternative Text" field. Describe what the image shows.', priority:'critical', canFix:true},
     'decorative-image-role': {title:'Decorative Image Needs role="presentation"', plain:'This image has empty alt text (decorative), but should be explicitly marked with role="presentation" for screen readers.', howToFix:'In LibGuides editor: Click image → Properties → In the "Advanced" tab, add Attribute: role="presentation". Or add descriptive alt text if the image isn\'t decorative.', priority:'minor', canFix:true},
@@ -26,11 +24,8 @@
     'landmark-banner-is-top-level': {title:'Banner Structure Issue', plain:'Page header structure problem - usually a LibGuides system issue.', howToFix:'SYSTEM ISSUE: You can ignore this or contact library-web-support@umich.edu.', priority:'system', canFix:false}
   };
 
-  // ============= IMPROVED SCORING LOGIC =============
   function calculateAccessibilityScore(violations) {
     let score = 100;
-    
-    // Group violations by rule ID to cap per-issue-type deductions
     const violationsByRule = {};
     violations.forEach(v => {
       if (!violationsByRule[v.id]) {
@@ -38,36 +33,26 @@
       }
       violationsByRule[v.id].count += v.nodes.length;
     });
-    
-    // Calculate deductions with caps per rule type
     Object.values(violationsByRule).forEach(rule => {
       let deduction = 0;
       const count = rule.count;
-      
-      // Base deduction per instance
-      if (rule.impact === 'critical') deduction = count * 8;      // Reduced from 15
-      else if (rule.impact === 'serious') deduction = count * 5;  // Reduced from 10
-      else if (rule.impact === 'moderate') deduction = count * 3; // Reduced from 5
-      else if (rule.impact === 'minor') deduction = count * 2;    // Reduced from 3
-      
-      // Cap maximum deduction per rule type to prevent one issue from dominating
+      if (rule.impact === 'critical') deduction = count * 8;
+      else if (rule.impact === 'serious') deduction = count * 5;
+      else if (rule.impact === 'moderate') deduction = count * 3;
+      else if (rule.impact === 'minor') deduction = count * 2;
       const maxDeductionPerRule = {
-        'critical': 25,   // Max 25 points for any single critical issue type
-        'serious': 20,    // Max 20 points for any single serious issue type
-        'moderate': 15,   // Max 15 points for any single moderate issue type
-        'minor': 10       // Max 10 points for any single minor issue type
+        'critical': 25,
+        'serious': 20,
+        'moderate': 15,
+        'minor': 10
       };
-      
       deduction = Math.min(deduction, maxDeductionPerRule[rule.impact] || 15);
       score -= deduction;
     });
-    
-    // Apply a floor - even terrible pages should show some score
-    // This helps distinguish between "bad" (30) and "very bad" (15)
     score = Math.max(15, score);
-    
     return Math.round(score);
   }
+
   function getExplanation(ruleId){
     if(ISSUE_EXPLANATIONS[ruleId]) return ISSUE_EXPLANATIONS[ruleId];
     for(let key in ISSUE_EXPLANATIONS) if(ruleId.includes(key)||key.includes(ruleId)) return ISSUE_EXPLANATIONS[key];
@@ -168,14 +153,11 @@
     return document;
   }
 
-  // ============= MULTI-PAGE DISCOVERY =============
   function discoverGuidePages() {
     const currentGuideId = window.location.href.match(/g=(\d+)/)?.[1];
-    
     if (!currentGuideId) {
       return [{ title: document.title || 'Current Page', url: window.location.href }];
     }
-    
     const guidePages = Array.from(document.querySelectorAll('a'))
       .filter(link => {
         if (!link.href.includes(`g=${currentGuideId}`) || !link.href.includes('&p=')) return false;
@@ -187,32 +169,22 @@
         title: link.textContent.trim() || 'Untitled Page',
         url: link.href.split('#')[0]
       }));
-    
-    // Remove duplicates
     const uniquePages = Array.from(new Map(guidePages.map(p => [p.url, p])).values());
-    
     return uniquePages.length > 0 ? uniquePages : [{ title: document.title || 'Current Page', url: window.location.href }];
   }
 
-  // ============= MULTI-PAGE SCANNER =============
   async function scanMultiplePages(pages) {
     const results = [];
     const totalPages = pages.length;
     let scannedCount = 0;
-    
-    // Scan pages in batches of 3 to avoid overwhelming browser
     const batchSize = 3;
-    
     for (let i = 0; i < pages.length; i += batchSize) {
       const batch = pages.slice(i, i + batchSize);
       const batchPromises = batch.map(page => scanPageInIframe(page, scannedCount, totalPages));
-      
       const batchResults = await Promise.allSettled(batchPromises);
-      
       batchResults.forEach((result, idx) => {
         scannedCount++;
         updateProgress(scannedCount, totalPages);
-        
         if (result.status === 'fulfilled') {
           results.push(result.value);
         } else {
@@ -224,7 +196,6 @@
         }
       });
     }
-    
     return results;
   }
 
@@ -233,34 +204,24 @@
       const iframe = document.createElement('iframe');
       iframe.style.cssText = 'position:absolute;width:0;height:0;border:none;visibility:hidden;';
       iframe.src = page.url;
-      
       const timeout = setTimeout(() => {
         iframe.remove();
         reject(new Error('Timeout'));
-      }, 15000); // 15 second timeout per page
-      
+      }, 15000);
       iframe.onload = async function() {
         try {
           const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
           const container = iframeDoc.querySelector('#s-lg-guide-main') || iframeDoc.querySelector('#s-lg-content') || iframeDoc.body;
-          
-          // Load axe in iframe if needed
           if (typeof iframe.contentWindow.axe === 'undefined') {
             await loadAxeInIframe(iframe);
           }
-          
-          // Run axe scan
           const axeResults = await iframe.contentWindow.axe.run(container, {
             runOnly: ['wcag2a', 'wcag2aa', 'best-practice'],
             resultTypes: ['violations']
           });
-          
-          // Run custom checks (need to inject our function)
           const customResults = await runCustomChecksInIframe(iframe, container);
-          
           clearTimeout(timeout);
           iframe.remove();
-          
           resolve({
             page: page,
             violations: [...axeResults.violations, ...customResults]
@@ -271,13 +232,11 @@
           reject(err);
         }
       };
-      
       iframe.onerror = function() {
         clearTimeout(timeout);
         iframe.remove();
         reject(new Error('Failed to load page'));
       };
-      
       document.body.appendChild(iframe);
     });
   }
@@ -293,20 +252,12 @@
   }
 
   async function runCustomChecksInIframe(iframe, context) {
-    // Inject custom check logic into iframe
-    const customCheckCode = `
-      (${runCustomChecks.toString()})
-    `;
-    
-    const getCssSelectorCode = `
-      (${getCssSelector.toString()})
-    `;
-    
+    const customCheckCode = `(${runCustomChecks.toString()})`;
+    const getCssSelectorCode = `(${getCssSelector.toString()})`;
     iframe.contentWindow.eval(`
       window.getCssSelector = ${getCssSelectorCode};
       window.runCustomChecks = ${customCheckCode};
     `);
-    
     return iframe.contentWindow.runCustomChecks(context);
   }
 
@@ -318,7 +269,6 @@
     }
   }
 
-  // ============= UI INITIALIZATION =============
   function initScanner(){
     if(!document.getElementById('a11y-global-styles')){
       const style = document.createElement('style');
@@ -331,53 +281,41 @@
       `;
       document.head.appendChild(style);
     }
-    
-    // Create sidebar
     const sidebar = document.createElement('div');
     sidebar.id = 'a11y-overlay';
-    sidebar.style.cssText = `position:fixed;top:0;right:0;bottom:0;width:450px;background:white;z-index:999999;display:flex;flex-direction:column;box-shadow:-4px 0 20px rgba(0,0,0,0.3);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;animation:slideIn 0.3s ease-out;transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);`;
-    
+    sidebar.style.cssText = `position:fixed;top:0;right:0;bottom:0;width:450px;background:white;z-index:999999;display:flex;flex-direction:column;box-shadow:-4px 0 20px rgba(0,0,0,0.3);font-family:'Lexend',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;animation:slideIn 0.3s ease-out;transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);`;
     sidebar.innerHTML = `
       <div id="a11y-resizer" title="Drag to resize sidebar"></div>
-      <div role="banner" id="a11y-header" style="background:#00274c;color:white;padding:20px;border-bottom:3px solid #ffcb05;transition:opacity 0.3s ease;">
+      <div role="banner" id="a11y-header" style="background:#00274c;color:white;padding:20px;border-bottom:3px solid #ffcb05;transition:opacity 0.3s ease;font-family:'Lexend',sans-serif;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
-          <h2 style="margin:0;font-size:20px;flex:1;color:#ffffff;">🔍 A11y Scanner</h2>
-          <button id="scan-mode-toggle" style="background:#FFCB05;border-radius:6px;padding:8px 12px;color:#00274C;font-weight:600;font-size:12px;cursor:pointer;transition:all 0.2s;" title="Switch scan mode">
-            Current Page
+          <h2 style="margin:0;font-size:20px;flex:1;color:#ffffff;font-family:'Lexend',sans-serif;">🔍 A11y Scanner</h2>
+          <button id="scan-mode-toggle" style="background:#ffcb05;border-radius:6px;padding:8px 12px;color:#00274C;font-weight:600;font-size:12px;cursor:pointer;transition:all 0.2s;font-family:'Lexend',sans-serif;" title="Scan all pages in this guide">
+            Show All Pages
           </button>
           <button id="a11y-close-btn" style="background:none;border:2px solid #ffcb05;border-radius:50%;width:40px;height:40px;line-height:1;color:#ffcb05;font-weight:bold;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s ease;" title="Close scanner" aria-label="Close">✕</button>
         </div>
-        <div id="scan-status" style="margin-top:10px;font-size:14px;opacity:0.9;color:#ffffff;">Discovering pages...</div>
       </div>
-      <main id="a11y-results" style="flex:1;overflow-y:auto;padding:20px;color:#333;text-align:center;">Initializing scanner...<br><br>⏳</main>
+      <main id="a11y-results" style="flex:1;overflow-y:auto;padding:20px;color:#333;text-align:center;font-family:'Lexend',sans-serif;">Initializing scanner...<br><br>⏳</main>
     `;
-    
     document.body.appendChild(sidebar);
-    
-    // Close button
     document.getElementById('a11y-close-btn').onclick = () => {
       sidebar.style.animation = 'slideOut 0.3s ease-in';
       sidebar.addEventListener('animationend', () => sidebar.remove());
     };
-    
-    // Resizing logic
     const resizer = document.getElementById('a11y-resizer');
     let isResizing = false;
     const minWidth = 300;
-    
     resizer.addEventListener('mousedown', function(e) {
       isResizing = true;
       sidebar.style.transition = 'none';
       document.body.style.userSelect = 'none';
       document.body.style.cursor = 'col-resize';
     });
-    
     document.addEventListener('mousemove', function(e) {
       if (!isResizing) return;
       const newWidth = window.innerWidth - e.clientX;
       if (newWidth > minWidth) sidebar.style.width = newWidth + 'px';
     });
-    
     document.addEventListener('mouseup', function() {
       if (isResizing) {
         isResizing = false;
@@ -386,42 +324,30 @@
         document.body.style.cursor = '';
       }
     });
-    
-    // Mode toggle
-    let isMultiPage = true;
+    let isMultiPage = false;
     const toggleBtn = document.getElementById('scan-mode-toggle');
-    
     toggleBtn.onclick = function() {
       isMultiPage = !isMultiPage;
-      this.textContent = isMultiPage ? 'Current Page' : 'All Pages';
+      this.textContent = isMultiPage ? 'Show Current Page' : 'Show All Pages';
+      this.title = isMultiPage ? 'Switch to scanning current page only' : 'Switch to scanning all pages in guide';
       startScan(isMultiPage);
     };
-    
-    // Start initial scan
     startScan(isMultiPage);
   }
 
   async function startScan(multiPage) {
-    document.getElementById('scan-status').textContent = 'Discovering pages...';
     document.getElementById('a11y-results').innerHTML = '<div style="text-align:center;padding:40px;">⏳ Scanning...</div>';
-    
     try {
       if (multiPage) {
         const pages = discoverGuidePages();
-        document.getElementById('scan-status').textContent = `Found ${pages.length} page(s) to scan...`;
-        
         const results = await scanMultiplePages(pages);
         displayMultiPageResults(results);
       } else {
-        // Single page mode (original behavior)
         const container = findLibGuidesContainer();
-        document.getElementById('scan-status').textContent = 'Scanning current page...';
-        
         const axeResults = await axe.run(container, {
           runOnly: ['wcag2a', 'wcag2aa', 'best-practice'],
           resultTypes: ['violations']
         });
-        
         const customResults = runCustomChecks(container);
         displaySinglePageResults({ violations: [...axeResults.violations, ...customResults] });
       }
@@ -438,161 +364,378 @@
 
   // ============= DISPLAY FUNCTIONS =============
   function displayMultiPageResults(results) {
-    const statusEl = document.getElementById('scan-status');
+  // Load Lexend font if not present
+  if (!document.getElementById("lexend-font")) {
+    const link = document.createElement("link");
+    link.id = "lexend-font";
+    link.rel = "stylesheet";
+    link.href = "https://fonts.googleapis.com/css2?family=Lexend:wght@400;600&display=swap";
+    document.head.appendChild(link);
+  }
+
+  let totalViolations = 0;
+  let totalScore = 0;
+  let validPageCount = 0;
+  const pageScores = [];
+  
+  results.forEach(result => {
+    if (result.error) {
+      pageScores.push({ page: result.page, score: 0, violations: [], error: result.error });
+      return;
+    }
+    const violations = result.violations;
+    totalViolations += violations.length;
+    const score = calculateAccessibilityScore(violations);
+    totalScore += score;
+    validPageCount++;
+    pageScores.push({ page: result.page, score, violations, error: null });
+  });
+  
+  const avgScore = validPageCount > 0 ? Math.floor(totalScore / validPageCount) : 0;
+  
+  // Softer colors matching single page design
+  const scoreColors = {
+    excellent: "#2c9a4b",
+    good: "#1493a0",
+    needsWork: "#d66a12",
+    poor: "#c23c3c",
+  };
+  
+  let scoreColor, scoreMessage;
+  if (avgScore >= 95) {
+    scoreColor = scoreColors.excellent;
+    scoreMessage = "Excellent";
+  } else if (avgScore >= 80) {
+    scoreColor = scoreColors.good;
+    scoreMessage = "Good";
+  } else if (avgScore >= 60) {
+    scoreColor = scoreColors.needsWork;
+    scoreMessage = "Needs Work";
+  } else {
+    scoreColor = scoreColors.poor;
+    scoreMessage = "Poor";
+  }
+  
+  const circumference = 339.292;
+  const progress = (avgScore / 100) * circumference;
+  const offset = circumference - progress;
+  
+  let html = `
+    <div style="text-align:center;padding:25px 20px 20px;border-bottom:1px solid #e5e7eb;margin-bottom:20px;background:#fafafa;font-family:'Lexend',sans-serif;">
+      <div style="font-size:14px;font-weight:600;color:#4a4a4a;margin-bottom:15px;text-transform:uppercase;letter-spacing:1px;">Overall Guide Score</div>
+      <svg width="90" height="90" viewBox="0 0 120 120"">
+        <circle cx="60" cy="60" r="54" fill="none" stroke="#e9ecef" stroke-width="8"/>
+        <circle cx="60" cy="60" r="54" fill="none" stroke="${scoreColor}" stroke-width="8" stroke-dasharray="${circumference}" stroke-dashoffset="${offset}" transform="rotate(-90 60 60)" stroke-linecap="round" style="transition:stroke-dashoffset 0.5s ease;"/>
+        <text x="60" y="65" text-anchor="middle" font-size="28" font-weight="600" fill="${scoreColor}">${avgScore}</text>
+        <text x="60" y="82" text-anchor="middle" font-size="11" fill="#999">/ 100</text>
+      </svg>
+      <div style="font-size:15px;font-weight:600;color:${scoreColor};margin-bottom:8px;">${scoreMessage} ${avgScore >= 95 ? '⭐⭐⭐⭐⭐' : avgScore >= 80 ? '⭐⭐⭐⭐' : avgScore >= 60 ? '⭐⭐⭐' : '⭐⭐'}</div>
+      <div style="font-size:13px;color:#00274C;background:#f1f3f5;padding:8px 12px;border-radius:6px;display:inline-block;">
+        Scanned ${results.length} page${results.length !== 1 ? 's' : ''} • Found ${totalViolations} issue${totalViolations !== 1 ? 's' : ''}
+      </div>
+    </div>
+  `;
+  
+  html += `<h3 style="color:#00274c;font-size:16px;margin:20px 0 12px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;font-weight:600;font-family:'Lexend',sans-serif;">📄 Per-Page Results <span style="font-size:12px;font-weight:normal;color:#00274c;">(in navigation order)</span></h3>`;
+  
+  pageScores.forEach((item, idx) => {
+    const pageScoreColor = item.score >= 80 ? scoreColors.excellent : item.score >= 60 ? scoreColors.good : scoreColors.poor;
+    const issueCount = item.violations.length;
     
-    // Calculate overall stats
-    let totalViolations = 0;
-    let totalScore = 0;
-    const pageScores = [];
-    
-    results.forEach(result => {
-      if (result.error) {
-        pageScores.push({ page: result.page, score: 0, violations: [], error: result.error });
-        return;
-      }
-      
-      const violations = result.violations;
-      totalViolations += violations.length;
-      
-      // Calculate score for this page using improved logic
-      const score = calculateAccessibilityScore(violations);
-      totalScore += score;
-      
-      pageScores.push({ page: result.page, score, violations, error: null });
-    });
-    
-    const avgScore = Math.round(totalScore / results.length);
-    let scoreColor, scoreMessage;
-    if(avgScore >= 95) {scoreColor = '#28a745'; scoreMessage = 'Excellent';}
-    else if(avgScore >= 80) {scoreColor = '#ffc107'; scoreMessage = 'Good';}
-    else if(avgScore >= 60) {scoreColor = '#fd7e14'; scoreMessage = 'Needs Work';}
-    else {scoreColor = '#dc3545'; scoreMessage = 'Poor';}
-    
-    statusEl.textContent = `Scanned ${results.length} page(s) - ${totalViolations} total issues`;
-    
-    // Build HTML
-    const circumference = 339.292;
-    const progress = (avgScore / 100) * circumference;
-    const offset = circumference - progress;
-    
-    let html = `
-      <div style="text-align:center;padding:25px 20px 20px;border-bottom:2px solid #e9ecef;margin-bottom:20px;background:#f8f9fa;">
-        <div style="font-size:14px;font-weight:700;color:#495057;margin-bottom:15px;text-transform:uppercase;letter-spacing:1.5px;">Overall Guide Score</div>
-        <svg width="90" height="90" viewBox="0 0 120 120" style="margin-bottom:0;">
+    html += `
+      <details style="background:#fff;padding:15px;margin:12px 0;border-radius:6px;border-left:4px solid ${pageScoreColor};box-shadow:0 1px 3px rgba(0,0,0,0.06);font-family:'Lexend',sans-serif;">
+        <summary style="cursor:pointer;font-weight:600;font-size:14px;display:flex;justify-content:space-between;align-items:center;">
+            <span style="color:#00274c;">${item.page.title}</span>
+            <span style="display:flex;gap:10px;align-items:center;">
+                <span style="font-size:14px;">${item.score >= 95 ? '⭐⭐⭐⭐⭐' : item.score >= 80 ? '⭐⭐⭐⭐' : item.score >= 60 ? '⭐⭐⭐' : '⭐⭐'}</span>
+                <span style="background:${pageScoreColor};color:white;padding:4px 10px;border-radius:4px;font-size:11px;font-weight:600;">${item.score}/100</span>
+                <span style="color:#666;font-size:12px;">${issueCount} issue${issueCount !== 1 ? 's' : ''}</span>
+            </span>
+        </summary>
+        <div style="margin-top:15px;padding-top:15px;border-top:1px solid #e5e7eb;">
+          ${item.error ? `<p style="color:#c23c3c;font-size:14px;">Error: ${item.error}</p>` : ''}
+          ${item.violations.length === 0 ? '<p style="color:#2c9a4b;font-size:14px;">✓ No issues found</p>' : ''}
+          ${item.violations.slice(0, 5).map(v => {
+            const exp = getExplanation(v.id);
+            return `<div style="background:#f8f9fa;padding:10px;margin:8px 0;border-radius:4px;font-size:13px;"><strong>${exp.title}</strong><br><span style="color:#666;">${v.nodes.length} instance${v.nodes.length !== 1 ? 's' : ''}</span></div>`;
+          }).join('')}
+          ${item.violations.length > 5 ? `<p style="font-size:12px;color:#666;margin-top:10px;">...and ${item.violations.length - 5} more</p>` : ''}
+        </div>
+      </details>
+    `;
+  });
+  
+  document.getElementById('a11y-results').innerHTML = html;
+}
+
+  function displaySinglePageResults(results) {
+  // Load Lexend font if not present
+  if (!document.getElementById("lexend-font")) {
+    const link = document.createElement("link");
+    link.id = "lexend-font";
+    link.rel = "stylesheet";
+    link.href =
+      "https://fonts.googleapis.com/css2?family=Lexend:wght@400;600&display=swap";
+    document.head.appendChild(link);
+  }
+
+  const violations = results.violations;
+  const score = calculateAccessibilityScore(violations);
+
+  // Softer, less saturated versions of the original colors
+  const scoreColors = {
+    excellent: "#2c9a4b",
+    good: "#1493a0",
+    needsWork: "#d66a12",
+    poor: "#c23c3c",
+  };
+
+  let scoreColor, scoreMessage;
+  if (score >= 95) {
+    scoreColor = scoreColors.excellent;
+    scoreMessage = "Excellent";
+  } else if (score >= 80) {
+    scoreColor = scoreColors.good;
+    scoreMessage = "Good";
+  } else if (score >= 60) {
+    scoreColor = scoreColors.needsWork;
+    scoreMessage = "Needs Work";
+  } else {
+    scoreColor = scoreColors.poor;
+    scoreMessage = "Poor";
+  }
+
+  // --- No issues ---
+  if (violations.length === 0) {
+    document.getElementById("a11y-results").innerHTML = `
+      <div style="text-align:center;padding:40px 20px;font-family:'Lexend',sans-serif;">
+        <div style="font-size:14px;font-weight:600;color:#666;margin-bottom:15px;text-transform:uppercase;letter-spacing:1px;">
+          Accessibility Score
+        </div>
+
+        <svg width="120" height="120" viewBox="0 0 120 120" style="margin-bottom:20px;">
           <circle cx="60" cy="60" r="54" fill="none" stroke="#e9ecef" stroke-width="8"/>
-          <circle cx="60" cy="60" r="54" fill="none" stroke="${scoreColor}" stroke-width="8" stroke-dasharray="${circumference}" stroke-dashoffset="${offset}" transform="rotate(-90 60 60)" stroke-linecap="round" style="transition:stroke-dashoffset 0.5s ease;"/>
-          <text x="60" y="65" text-anchor="middle" font-size="28" font-weight="bold" fill="${scoreColor}">${avgScore}</text>
-          <text x="60" y="82" text-anchor="middle" font-size="11" fill="#999">/ 100</text>
+          <circle cx="60" cy="60" r="54" fill="none" stroke="#2c9a4b" stroke-width="8"
+            stroke-dasharray="339.292" stroke-dashoffset="0"
+            transform="rotate(-90 60 60)" stroke-linecap="round"/>
+
+          <text x="60" y="65" text-anchor="middle"
+            font-size="32" font-weight="600" fill="#2c9a4b">100</text>
+          <text x="60" y="85" text-anchor="middle" font-size="12" fill="#666">/ 100</text>
         </svg>
-        <div style="font-size:16px;font-weight:600;color:${scoreColor};margin-bottom:2px;">${scoreMessage}</div>
-        <div style="font-size:12px;color:#999;">${results.length} pages • ${totalViolations} issues</div>
+
+        <div style="font-size:13px;color:#00274C;background:#f1f3f5;padding:8px 12px;border-radius:6px;margin-bottom:15px;display:inline-block;">
+          Current page • No issues found
+        </div>
+
+        <div style="background:#e6f4ea;padding:30px;border-radius:10px;color:#155724;text-align:center;border:1.5px solid #ccebd5;">
+          <div style="font-size:48px;margin-bottom:15px;">✅</div>
+          <h3 style="margin:0 0 10px 0;font-size:20px;font-weight:600;">Perfect Score!</h3>
+          <p style="margin:0;font-size:15px;">No accessibility issues detected in the LibGuides content.</p>
+        </div>
       </div>
     `;
-    
-    // Keep pages in original navigation order (don't sort by score)
-    // pageScores already in correct order from results array
-    
-    html += `<h3 style="color:#00274c;font-size:16px;margin:20px 0 12px;padding-bottom:8px;border-bottom:2px solid #e9ecef;">📄 Per-Page Results <span style="font-size:12px;font-weight:normal;color:#666;">(in navigation order)</span></h3>`;
-    
-    pageScores.forEach((item, idx) => {
-      const scoreColor = item.score >= 80 ? '#28a745' : item.score >= 60 ? '#ffc107' : '#dc3545';
-      const issueCount = item.violations.length;
-      
+    return;
+  }
+
+  // ---- violations split ----
+  const canFix = [];
+  const systemIssues = [];
+
+  violations.forEach((v) => {
+    const exp = getExplanation(v.id);
+    if (exp.canFix === false)
+      systemIssues.push({ violation: v, explanation: exp });
+    else canFix.push({ violation: v, explanation: exp });
+  });
+
+  const circumference = 339.292;
+  const offset = circumference - (score / 100) * circumference;
+
+  let html = `
+    <div style="text-align:center;padding:25px 20px 20px 20px;border-bottom:1px solid #e5e7eb;margin-bottom:20px;background:#fafafa;font-family:'Lexend',sans-serif;">
+      <div style="font-size:14px;font-weight:600;color:#4a4a4a;margin-bottom:15px;text-transform:uppercase;letter-spacing:1px;">
+        Accessibility Score
+      </div>
+
+      <svg width="90" height="90" viewBox="0 0 120 120"">
+        <circle cx="60" cy="60" r="54" fill="none" stroke="#e9ecef" stroke-width="8"/>
+        <circle cx="60" cy="60" r="54" fill="none"
+          stroke="${scoreColor}" stroke-width="8"
+          stroke-dasharray="${circumference}"
+          stroke-dashoffset="${offset}"
+          transform="rotate(-90 60 60)"
+          stroke-linecap="round"
+        />
+
+        <text x="60" y="65" text-anchor="middle"
+          font-size="28" font-weight="600" fill="${scoreColor}">
+          ${score}
+        </text>
+        <text x="60" y="82" text-anchor="middle" font-size="11" fill="#999">/ 100</text>
+      </svg>
+
+      <div style="font-size:15px;font-weight:600;color:${scoreColor};margin-bottom:8px;">
+        ${scoreMessage} ${score >= 95 ? '⭐⭐⭐⭐⭐' : score >= 80 ? '⭐⭐⭐⭐' : score >= 60 ? '⭐⭐⭐' : '⭐⭐'}
+      </div>
+
+      <div style="font-size:13px;color:#00274C;background:#f1f3f5;padding:8px 12px;border-radius:6px;display:inline-block;">
+        Current page • Found ${violations.length} issue${violations.length !== 1 ? "s" : ""}
+      </div>
+    </div>
+  `;
+
+  // Accent colors toned down
+  const priorityColors = {
+    critical: "#c23c3c",
+    important: "#d66a12",
+    minor: "#1493a0",
+  };
+
+  // Muted background colors matching each priority
+  const priorityBackgrounds = {
+    critical: "rgba(194, 60, 60, 0.04)",
+    important: "rgba(214, 106, 18, 0.04)",
+    minor: "rgba(20, 147, 160, 0.04)",
+  };
+
+  // ========= YOU CAN FIX =========
+  if (canFix.length > 0) {
+    html += `
+      <div style="margin-bottom:25px;font-family:'Lexend',sans-serif;">
+        <h3 style="color:#00274c;font-size:16px;margin:20px 0 12px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;font-weight:600;font-family:'Lexend',sans-serif;">
+          ✏️ Issues You Can Fix
+        </h3>
+    `;
+
+    canFix.forEach((item, index) => {
+      const v = item.violation;
+      const exp = item.explanation;
+      const color = priorityColors[exp.priority] || "#6c757d";
+      const bgColor = priorityBackgrounds[exp.priority] || "rgba(108, 117, 125, 0.04)";
+      const selectors = v.nodes.map((n) => n.target[0]).join("|");
+
       html += `
-        <details style="background:#f8f9fa;padding:15px;margin:12px 0;border-radius:6px;border-left:4px solid ${scoreColor};">
-          <summary style="cursor:pointer;font-weight:600;font-size:14px;display:flex;justify-content:space-between;align-items:center;">
-            <span>${item.page.title}</span>
-            <span style="display:flex;gap:10px;align-items:center;">
-              <span style="background:${scoreColor};color:white;padding:4px 10px;border-radius:12px;font-size:11px;">${item.score}/100</span>
-              <span style="color:#666;font-size:12px;">${issueCount} issue${issueCount !== 1 ? 's' : ''}</span>
+        <details style="background:${bgColor};padding:16px;margin:16px 0;border-radius:6px;border-left:4px solid ${color};box-shadow:0 1px 3px rgba(0,0,0,0.06);text-align:left;">
+          <summary style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;">
+            <div style="font-size:15px;font-weight:600;color:#00274c;flex:1;">
+              ${index + 1}. ${exp.title}
+            </div>
+            <span style="background:${color};color:white;padding:3px 8px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase;">
+              ${exp.priority}
             </span>
           </summary>
-          <div style="margin-top:15px;padding-top:15px;border-top:1px solid #dee2e6;">
-            ${item.error ? `<p style="color:#dc3545;">Error: ${item.error}</p>` : ''}
-            ${item.violations.length === 0 ? '<p style="color:#28a745;">✓ No issues found</p>' : ''}
-            ${item.violations.slice(0, 5).map(v => {
-              const exp = getExplanation(v.id);
-              return `<div style="background:white;padding:10px;margin:8px 0;border-radius:4px;font-size:13px;"><strong>${exp.title}</strong><br><span style="color:#666;">${v.nodes.length} instance(s)</span></div>`;
-            }).join('')}
-            ${item.violations.length > 5 ? `<p style="font-size:12px;color:#666;margin-top:10px;">...and ${item.violations.length - 5} more</p>` : ''}
+
+          <div style="margin-top:14px;font-size:15px;line-height:1.6;color:#4a5568;text-align:center;">
+
+            <div style="background:white;padding:12px;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:14px;">
+              <h5 style="margin:0 0 6px 0;font-weight:700;color:#1a2e3f;font-size:14px;">
+                📖 What's wrong
+              </h5>
+              <p style="margin:0;">${exp.plain}</p>
+            </div>
+
+            <div style="background:white;padding:12px;border:1px solid #d8e7f7;border-radius:6px;margin-bottom:14px;">
+              <h5 style="margin:0 0 6px 0;font-weight:700;color:##1a2e3f;font-size:14px;">
+                🔧 How to fix
+              </h5>
+              <p style="margin:0;">${exp.howToFix}</p>
+            </div>
+
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <button class="highlight-btn"
+                data-selectors="${selectors}"
+                style="background:#ffcb05;color:#00274c;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:13px;font-weight:600;">
+                👁️ Show on Page
+              </button>
+              <span style="font-size:13px;color:#666;">${v.nodes.length} affected</span>
+            </div>
+
+            <details style="margin-top:12px;">
+              <summary style="cursor:pointer;font-size:13px;color:#666;font-weight:600;">
+                Technical details
+              </summary>
+              <div style="background:#fafafa;padding:10px;margin-top:6px;border-radius:4px;font-size:12px;color:#555;border:1px solid #e5e7eb;line-height:1.5;">
+                <strong>Rule:</strong> ${v.id}<br>
+                <strong>WCAG:</strong> ${v.description}<br>
+                <strong>Element:</strong>
+                <code style="background:#f3f4f6;padding:2px 4px;border-radius:3px;font-size:11px;">
+                  ${v.nodes[0]?.target[0] || "N/A"}
+                </code>
+              </div>
+            </details>
+
           </div>
         </details>
       `;
     });
-    
-    document.getElementById('a11y-results').innerHTML = html;
+
+    html += `</div>`;
   }
 
-  function displaySinglePageResults(results) {
-    // Use improved scoring logic
-    const violations = results.violations;
-    const statusEl = document.getElementById('scan-status');
-    const score = calculateAccessibilityScore(violations);
-    
-    let scoreColor, scoreMessage;
-    if(score >= 95) {scoreColor = '#28a745'; scoreMessage = 'Excellent';}
-    else if(score >= 80) {scoreColor = '#ffc107'; scoreMessage = 'Good';}
-    else if(score >= 60) {scoreColor = '#fd7e14'; scoreMessage = 'Needs Work';}
-    else {scoreColor = '#dc3545'; scoreMessage = 'Poor';}
-    if(statusEl) statusEl.textContent = violations.length === 0 ? 'Scan complete - No issues!' : `Found ${violations.length} issue(s)`;
-    if(violations.length === 0) {
-      document.getElementById('a11y-results').innerHTML = `<div style="text-align:center;padding:40px 20px;"><div style="font-size:14px;font-weight:600;color:#666;margin-bottom:15px;text-transform:uppercase;letter-spacing:1px;">Accessibility Score</div><svg width="120" height="120" viewBox="0 0 120 120" style="margin-bottom:20px;"><circle cx="60" cy="60" r="54" fill="none" stroke="#e9ecef" stroke-width="8"/><circle cx="60" cy="60" r="54" fill="none" stroke="#28a745" stroke-width="8" stroke-dasharray="339.292" stroke-dashoffset="0" transform="rotate(-90 60 60)" stroke-linecap="round"/><text x="60" y="65" text-anchor="middle" font-size="32" font-weight="bold" fill="#28a745">100</text><text x="60" y="85" text-anchor="middle" font-size="12" fill="#666">/ 100</text></svg><div style="background:#d4edda;padding:30px;border-radius:10px;color:#155724;text-align:center;border:2px solid #c3e6cb;margin-top:10px;"><div style="font-size:48px;margin-bottom:15px;">✅</div><h3 style="margin:0 0 10px 0;font-size:20px;">Perfect Score!</h3><p style="margin:0;font-size:15px;">No accessibility issues detected in the LibGuides content.</p></div></div>`;
-      return;
-    }
-    const canFix = [], systemIssues = [];
-    violations.forEach(v=>{
-      const exp = getExplanation(v.id);
-      if(exp.canFix === false) systemIssues.push({violation: v, explanation: exp});
-      else canFix.push({violation: v, explanation: exp});
+  // ========== SYSTEM ISSUES ==========
+  if (systemIssues.length > 0) {
+    html += `
+      <div style="margin-bottom:25px;">
+        <h3 style="color:#6c757d;font-size:16px;margin-bottom:15px;padding-bottom:8px;border-bottom:1px solid #e5e7eb;font-weight:600;">
+          ⚙️ System Issues
+        </h3>
+    `;
+
+    systemIssues.forEach((item) => {
+      const v = item.violation;
+      const exp = item.explanation;
+
+      html += `
+        <details style="background:rgba(108, 117, 125, 0.04);padding:16px;margin:16px 0;border-left:4px solid #6c757d;border-radius:6px;opacity:0.85;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+          <summary style="cursor:pointer;font-size:15px;font-weight:600;color:#495057;">
+            ${exp.title}
+          </summary>
+
+          <div style="margin-top:14px;font-size:15px;line-height:1.6;color:#4a5568;">
+            <p style="margin-bottom:12px;">${exp.plain}</p>
+            <div style="background:#f3f4f6;padding:12px;border-radius:6px;font-size:14px;color:#333;border:1px solid #e5e7eb;">
+              ${exp.howToFix}
+            </div>
+          </div>
+        </details>
+      `;
     });
-    const circumference = 339.292, progress = (score / 100) * circumference, offset = circumference - progress;
-    let html = `<div style="text-align:center;padding:25px 20px 20px 20px;border-bottom:2px solid #e9ecef;margin-bottom:20px;background:#f8f9fa;"><div style="font-size:14px;font-weight:700;color:#495057;margin-bottom:15px;text-transform:uppercase;letter-spacing:1.5px;">Accessibility Score</div><svg width="90" height="90" viewBox="0 0 120 120" style="margin-bottom:0px;"><circle cx="60" cy="60" r="54" fill="none" stroke="#e9ecef" stroke-width="8"/><circle cx="60" cy="60" r="54" fill="none" stroke="${scoreColor}" stroke-width="8" stroke-dasharray="${circumference}" stroke-dashoffset="${offset}" transform="rotate(-90 60 60)" stroke-linecap="round" style="transition: stroke-dashoffset 0.5s ease;"/><text x="60" y="65" text-anchor="middle" font-size="28" font-weight="bold" fill="${scoreColor}">${score}</text><text x="60" y="82" text-anchor="middle" font-size="11" fill="#999">/ 100</text></svg><div style="font-size:16px;font-weight:600;color:${scoreColor};margin-bottom:2px;">${scoreMessage}</div></div>`;
-    if(canFix.length > 0){
-      html += `<div style="margin-bottom:25px;"><h3 style="color:#00274c;font-size:16px;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid #e9ecef;">✏️ Issues You Can Fix</h3>`;
-      canFix.forEach((item,index)=>{
-        const v = item.violation, exp = item.explanation;
-        const priorityColors = {critical:'#dc3545', important:'#fd7e14', minor:'#17a2b8'};
-        const color = priorityColors[exp.priority] || '#6c757d';
-        const allSelectors = v.nodes.map(n=>n.target[0]).filter(Boolean).join('|');
-        html += `<div style="background:#f8f9fa;padding:15px;margin:12px 0;border-left:4px solid ${color};border-radius:6px;"><div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:12px;"><h3 style="margin:0;color:#00274c;font-size:15px;font-weight:600;flex:1;line-height:1.3;">${index+1}. ${exp.title}</h3><span style="background:${color};color:white;padding:3px 8px;border-radius:3px;font-size:10px;font-weight:bold;text-transform:uppercase;white-space:nowrap;margin-left:10px;">${exp.priority}</span></div><div style="background:white;padding:12px;border-radius:4px;margin-bottom:10px;"><div style="font-weight:600;color:#495057;margin-bottom:6px;font-size:12px;">📖 What's wrong:</div><p style="margin:0;font-size:13px;color:#666;line-height:1.5;">${exp.plain}</p></div><div style="background:#e7f3ff;padding:12px;border-radius:4px;border-left:3px solid #0066cc;margin-bottom:10px;"><div style="font-weight:600;color:#004085;margin-bottom:6px;font-size:12px;">🔧 How to fix:</div><p style="margin:0;font-size:13px;color:#004085;line-height:1.5;">${exp.howToFix}</p></div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><button class="highlight-btn" data-selectors="${allSelectors}" style="background:#ffcb05;color:#00274c;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;">👁️ Show on Page</button><span style="font-size:12px;color:#666;">${v.nodes.length} affected</span></div><details style="margin-top:10px;"><summary style="cursor:pointer;font-size:12px;color:#666;font-weight:600;">Technical details</summary><div style="background:white;padding:8px;margin-top:6px;border-radius:4px;font-size:11px;color:#666;line-height:1.5;"><strong>Rule:</strong> ${v.id}<br><strong>WCAG:</strong> ${v.description}<br><strong>Element:</strong> <code style="background:#f8f9fa;padding:2px 4px;border-radius:2px;font-size:10px;">${v.nodes[0]?.target[0]||'N/A'}</code></div></details></div>`;
-      });
-      html+='</div>';
-    }
-    if(systemIssues.length > 0){
-      html += `<div style="margin-bottom:20px;"><h3 style="color:#6c757d;font-size:16px;margin-bottom:12px;padding-bottom:8px;border-bottom:2px solid #e9ecef;">⚙️ System Issues</h3>`;
-      systemIssues.forEach(item=>{
-        const v = item.violation, exp = item.explanation;
-        html += `<div style="background:#f8f9fa;padding:15px;margin:12px 0;border-left:4px solid #6c757d;border-radius:6px;opacity:0.8;"><h3 style="margin:0 0 10px 0;color:#495057;font-size:14px;font-weight:600;">${exp.title}</h3><p style="margin:0 0 8px 0;font-size:13px;color:#666;line-height:1.5;">${exp.plain}</p><div style="background:#e9ecef;padding:10px;border-radius:4px;font-size:12px;color:#495057;">${exp.howToFix}</div></div>`;
-      });
-      html+='</div>';
-    }
-    document.getElementById('a11y-results').innerHTML = html;
-    // Attach highlight button handlers
-    document.querySelectorAll('.highlight-btn').forEach(btn=>{
-      btn.onclick = function(){
-        const selectorsString = this.getAttribute('data-selectors');
-        if (!selectorsString) return;
-        const selectorArray = selectorsString.split('|').filter(s => s);
-        const success = highlightAllElements(selectorArray);
-        if (success) {
-          this.textContent = '✓ Highlighted';
-          this.style.background = '#28a745';
-          this.style.color = 'white';
-          setTimeout(() => {
-            this.textContent = '👁️ Show on Page';
-            this.style.background = '#ffcb05';
-            this.style.color = '#00274c';
-          }, 2000);
-        } else {
-          this.textContent = '✗ Not found';
-          this.style.background = '#dc3545';
-          this.style.color = 'white';
-        }
-      };
-    });
+
+    html += `</div>`;
   }
 
-  // ============= INITIALIZATION =============
+  // push html
+  document.getElementById("a11y-results").innerHTML = html;
+
+  // attach highlight events
+  document.querySelectorAll(".highlight-btn").forEach((btn) => {
+    btn.onclick = function () {
+      const selectorsString = this.getAttribute("data-selectors");
+      if (!selectorsString) return;
+
+      const selectorArray = selectorsString.split("|").filter(Boolean);
+      const success = highlightAllElements(selectorArray);
+
+      if (success) {
+        this.textContent = "✓ Highlighted";
+        this.style.background = "#2c9a4b";
+        this.style.color = "white";
+        setTimeout(() => {
+          this.textContent = "👁️ Show on Page";
+          this.style.background = "#ffcb05";
+          this.style.color = "#00274c";
+        }, 2000);
+      } else {
+        this.textContent = "✗ Not found";
+        this.style.background = "#c23c3c";
+        this.style.color = "white";
+      }
+    };
+  });
+}
+
+
   if(typeof axe === 'undefined'){
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/axe-core/4.7.2/axe.min.js';
@@ -602,4 +745,5 @@
   } else {
     initScanner();
   }
+
 })();
