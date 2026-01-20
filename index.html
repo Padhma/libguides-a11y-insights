@@ -402,8 +402,8 @@
 <body>
 
 <div class="header">
-    <h1>LibGuides Accessibility Scanner</h1>
-    <p>Comprehensive WCAG 2.1 AA compliance scanning for LibGuides — fast, private, and free</p>
+    <h1>LibGuides A11y Insights</h1>
+    <p>Comprehensive WCAG 2.1 AA compliance scanning for LibGuides</p>
 </div>
 
 <div class="container">
@@ -419,9 +419,9 @@
     <div id="about" class="tab-content active">
         <h2>About This Project</h2>
         
-        <p>The LibGuides Accessibility Scanner is a browser-based tool designed to help LibGuides content creators ensure their guides are accessible and inclusive for all users, including those relying on screen readers and other assistive technologies.</p>
+        <p>LibGuides A11y Insights is a bookmarklet that helps LibGuide owners create accessible and inclusive guides for all users, including those who rely on screen readers and other assistive technologies.</p>
 
-        <p>Built initially for the University of Michigan Library, this tool empowers anyone managing LibGuides to quickly identify and fix accessibility issues according to WCAG 2.1 AA standards.</p>
+        <p>Built for the University of Michigan Library, this tool helps anyone managing LibGuides quickly spot and fix accessibility issues, offering clear, actionable guidance aligned with WCAG 2.1 AA standards.</p>
 
         <div class="bookmarklet-section">
             <h3 style="margin-bottom: 16px; color: var(--color-primary-blue);">Try It Now</h3>
@@ -434,7 +434,12 @@
         </div>
 
         <h3>Technology</h3>
-        <p>The scanner uses the industry-standard <a href="https://github.com/dequelabs/axe-core" target="_blank">axe-core</a> accessibility testing engine (the same technology used by Google and Microsoft) combined with custom LibGuides-specific checks.</p>
+        <p>The scanner is built on two complementary testing layers:</p>
+        <ul style="margin: 16px 0; padding-left: 24px;">
+            <li><strong>Industry-Standard Foundation:</strong> Uses <a href="https://github.com/dequelabs/axe-core" target="_blank">axe-core</a>, the same accessibility testing engine trusted by Google, Microsoft, and accessibility professionals worldwide</li>
+            <li><strong>Custom LibGuides Intelligence:</strong> Specialized checks designed specifically for common LibGuides accessibility issues, including empty box titles, URL-only links, poor alt text quality, problematic table structures, duplicate IDs from pasted content, and layout table detection</li>
+        </ul>
+        <p>This dual-layer approach catches both standard WCAG violations and LibGuides-specific patterns that generic tools miss, with remediation instructions tailored to the LibGuides CMS interface.</p>
 
         <h3>Privacy & Security</h3>
         <p>All scanning happens entirely in your browser. No data is transmitted to external servers, ensuring complete privacy for your content and users.</p>
